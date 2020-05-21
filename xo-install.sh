@@ -19,7 +19,7 @@ source $CONFIG_FILE
 
 # Set some default variables if sourcing config file fails for some reason
 PORT=${PORT:-80}
-INSTALLDIR=${INSTALLDIR:-"/etc/xo"}
+INSTALLDIR=${INSTALLDIR:-"/opt/xo"}
 BRANCH=${BRANCH:-"master"}
 LOGFILE=${LOGFILE:-"$(dirname $0)/xo-install.log"}
 AUTOUPDATE=${AUTOUPDATE:-"true"}
@@ -35,6 +35,7 @@ COLOR_N='\e[0m'
 COLOR_GREEN='\e[1;32m'
 COLOR_RED='\e[1;31m'
 COLOR_BLUE='\e[1;34m'
+COLOR_WHITE='\e[1;97m'
 OK="[${COLOR_GREEN}ok${COLOR_N}]"
 FAIL="[${COLOR_RED}fail${COLOR_N}]"
 INFO="[${COLOR_BLUE}info${COLOR_N}]"
@@ -81,7 +82,7 @@ function InstallDependenciesCentOS {
 	if [[ -z $(rpm -qa | grep ^node) ]]; then
 		echo
 		echo -ne "${PROGRESS} Installing node.js"
-		curl -s -L https://rpm.nodesource.com/setup_8.x | bash - >/dev/null
+		curl -s -L https://rpm.nodesource.com/setup_12.x | bash - >/dev/null
 		echo -e "\r${OK} Installing node.js"
 	fi
 
@@ -106,16 +107,28 @@ function InstallDependenciesCentOS {
 	if [[ -z $(which vhdimount) ]]; then
 		echo
 		echo -ne "${PROGRESS} Installing libvhdi-tools from forensics repository"
-		rpm -ivh https://forensics.cert.org/cert-forensics-tools-release-el7.rpm >/dev/null
+		if [[ $OSVERSION == "7" ]]; then
+			rpm -ivh https://forensics.cert.org/cert-forensics-tools-release-el7.rpm >/dev/null
+		fi
+		if [[ $OSVERSION == "8" ]]; then
+			rpm -ivh https://forensics.cert.org/cert-forensics-tools-release-el8.rpm >/dev/null
+		fi
 		sed -i 's/enabled=1/enabled=0/g' /etc/yum.repos.d/cert-forensics-tools.repo
 		yum --enablerepo=forensics install -y libvhdi-tools >/dev/null
 		echo -e "\r${OK} Installing libvhdi-tools from forensics repository"
 	fi
 
-	# install
+	#determine which python package is needed. CentOS 7 requires python, 8 is python3
+	if [[ $OSVERSION == "8" ]]; then
+		PYTHON="python3"
+	else
+		PYTHON="python"
+	fi
+
+	# install packages
 	echo
 	echo -ne "${PROGRESS} Installing build dependencies, redis server, python, git, nfs-utils, cifs-utils"
-	yum -y install gcc gcc-c++ make openssl-devel redis libpng-devel python git nfs-utils cifs-utils >/dev/null
+	yum -y install gcc gcc-c++ make openssl-devel redis libpng-devel $PYTHON git nfs-utils cifs-utils lvm2 >/dev/null
 	echo -e "\r${OK} Installing build dependencies, redis server, python, git, nfs-utils, cifs-utils"
 
 	echo
@@ -138,6 +151,13 @@ function InstallDependenciesDebian {
 
 	# Install necessary dependencies for XO build
 
+	if [[ $OSVERSION =~ (16|18|20) ]]; then
+		echo -ne "${PROGRESS} OS Ubuntu so making sure universe repository is enabled"
+		add-apt-repository universe >/dev/null
+		echo -e "\r${OK} OS Ubuntu so making sure universe repository is enabled"
+		echo
+	fi
+
 	echo
 	echo -ne "${PROGRESS} Running apt-get update"
 	apt-get update >/dev/null
@@ -148,6 +168,13 @@ function InstallDependenciesDebian {
 	echo -ne "${PROGRESS} Installing apt-transport-https and ca-certificates packages to support https repos"
 	apt-get install -y apt-transport-https ca-certificates >/dev/null
 	echo -e "\r${OK} Installing apt-transport-https and ca-certificates packages to support https repos"
+
+	if [[ $OSVERSION == "10" ]]; then
+		echo
+		echo -ne "${PROGRESS} Debian 10, so installing gnupg also"
+		apt-get install gnupg -y >/dev/null
+		echo -e "\r${OK} Debian 10, so installing gnupg also"
+	fi
 
 	# install curl for later tasks if missing
 	if [[ -z $(which curl) ]]; then
@@ -181,16 +208,34 @@ function InstallDependenciesDebian {
 	if [[ -z $(dpkg -l | grep node) ]] || [[ -z $(which npm) ]]; then
 		echo
 		echo -ne "${PROGRESS} Installing node.js"
-		curl -sL https://deb.nodesource.com/setup_8.x | bash - >/dev/null
+		curl -sL https://deb.nodesource.com/setup_12.x | bash - >/dev/null
 		apt-get install -y nodejs >/dev/null
 		echo -e "\r${OK} Installing node.js"
 	fi
 
+	# if we run Debian 10 and have default nodejs v10 installed, then replace it with node 12.x
+	if [[ $OSVERSION == "10" ]]; then
+		NODEV=$(node -v 2>/dev/null| grep -Eo '[0-9.]+' | cut -d'.' -f1)
+		if [[ ! -z $NODEV ]] &&[[ $NODEV < 12 ]]; then
+			echo
+			echo -ne "${PROGRESS} Installing node.js"
+			curl -sL https://deb.nodesource.com/setup_12.x | bash - >/dev/null
+			apt-get install -y nodejs >/dev/null
+			echo -e "\r${OK} Installing node.js"
+		fi
+	fi
+	
+	#determine which python package is needed. Ubuntu 20 requires python2-minimal, 16 and 18 are python-minimal
+	if [[ $OSVERSION == "20" ]]; then
+		PYTHON="python2-minimal"
+	else
+		PYTHON="python-minimal"
+	fi
 
 	# install packages
 	echo
-	echo -ne "${PROGRESS} Installing build dependencies, redis server, python, git, libvhdi-utils, lvm2, nfs-common, cifs-utils"
-	apt-get install -y build-essential redis-server libpng-dev git python-minimal libvhdi-utils lvm2 nfs-common cifs-utils >/dev/null
+	echo -ne "${PROGRESS} Installing build dependencies, redis server, git, libvhdi-utils, python-minimal, lvm2, nfs-common, cifs-utils"
+	apt-get install -y build-essential redis-server libpng-dev git libvhdi-utils $PYTHON lvm2 nfs-common cifs-utils >/dev/null
 	echo -e "\r${OK} Installing build dependencies, redis server, python, git, libvhdi-utils, lvm2, nfs-common, cifs-utils"
 
 	echo
@@ -234,26 +279,21 @@ function InstallXOPlugins {
 
 		if [[ "$PLUGINS" == "all" ]]; then
 			echo
-			echo -ne "${PROGRESS} Installing all available plugins as defined in PLUGINS variable"
+			echo -ne "${PROGRESS} Installing plugins"
 			find "$INSTALLDIR/xo-builds/xen-orchestra-$TIME/packages/" -maxdepth 1 -mindepth 1 -not -name "xo-server" -not -name "xo-web" -not -name "xo-server-cloud" -exec ln -sn {} "$INSTALLDIR/xo-builds/xen-orchestra-$TIME/packages/xo-server/node_modules/" \;
-			echo -e "\r${OK} Installing all available plugins as defined in PLUGINS variable"
 		else
 			echo
-			echo -ne "${PROGRESS} Installing plugins defined in PLUGINS variable"
+			echo -ne "${PROGRESS} Installing plugins"
 			local PLUGINSARRAY=($(echo "$PLUGINS" | tr ',' ' '))
 				for x in "${PLUGINSARRAY[@]}"; do
 				if [[ $(find $INSTALLDIR/xo-builds/xen-orchestra-$TIME/packages -type d -name "$x") ]]; then
 					ln -sn $INSTALLDIR/xo-builds/xen-orchestra-$TIME/packages/$x $INSTALLDIR/xo-builds/xen-orchestra-$TIME/packages/xo-server/node_modules/
-					echo -e "\r${OK} Installing plugins defined in PLUGINS variable"
-				else
-					echo -e "\r${FAIL} Installing plugins defined in PLUGINS variable"
-					echo -e "	${INFO} No $x plugin found from xen-orchestra packages, skipping"
-				continue
 				fi
 			done
 		fi
 
 		cd $INSTALLDIR/xo-builds/xen-orchestra-$TIME && yarn >/dev/null && yarn build >/dev/null
+		echo -e "\r${OK} Installing plugins"
 	else
 		echo
 		echo -e "${INFO} No plugins to install"
@@ -271,7 +311,7 @@ function InstallXO {
 
 	# Create user if doesn't exist (if defined)
 
-	if [ $XOUSER ]; then
+	if [[ "$XOUSER" != "root" ]]; then
 		if [[ -z $(getent passwd $XOUSER) ]]; then
 			echo
 			echo -ne "${PROGRESS} Creating missing $XOUSER user"
@@ -376,7 +416,7 @@ function InstallXO {
 	# If this isn't a fresh install, then list the upgrade the user is making.
 	if [[ ! -z "$OLD_REPO_HASH" ]]; then
 		echo
-		echo -e "${INFO}Updating xen-orchestra from '$OLD_REPO_HASH_SHORT' to '$NEW_REPO_HASH_SHORT'"
+		echo -e "${INFO} Updating xen-orchestra from '$OLD_REPO_HASH_SHORT' to '$NEW_REPO_HASH_SHORT'"
 	fi
 
 	echo
@@ -396,7 +436,7 @@ function InstallXO {
 	echo -e "${INFO} Adding WorkingDirectory parameter to systemd service configuration file"
 	sed -i "/ExecStart=.*/a WorkingDirectory=$INSTALLDIR/xo-server" $INSTALLDIR/xo-builds/xen-orchestra-$TIME/packages/xo-server/xo-server.service
 
-	if [ $XOUSER ]; then
+	if [[ "$XOUSER" != "root" ]]; then
 		echo -e "${INFO} Adding user to systemd config"
 		sed -i "/SyslogIdentifier=.*/a User=$XOUSER" $INSTALLDIR/xo-builds/xen-orchestra-$TIME/packages/xo-server/xo-server.service
 
@@ -407,7 +447,7 @@ function InstallXO {
 			fi
 
 			if [[ ! -z $NODEBINARY ]]; then
-				echo -ne "${INFO} Attempting to set cap_net_bind_service permission for $NODEBINARY"
+				echo -ne "${PROGRESS} Attempting to set cap_net_bind_service permission for $NODEBINARY"
 				setcap 'cap_net_bind_service=+ep' $NODEBINARY >/dev/null \
 				&& echo -e "\r${OK} Attempting to set cap_net_bind_service permission for $NODEBINARY" || { echo -e "\r${FAIL} Attempting to set cap_net_bind_service permission for $NODEBINARY" ; echo "	Non-privileged user might not be able to bind to <1024 port. xo-server won't start most likely" ; }
 			else
@@ -441,6 +481,7 @@ function InstallXO {
                 echo -e "${INFO} Activating modified configuration file"
 		mkdir -p $CONFIGPATH/.config/xo-server
                 mv -f $INSTALLDIR/xo-builds/xen-orchestra-$TIME/packages/xo-server/sample.config.toml $CONFIGPATH/.config/xo-server/config.toml
+		
 
         fi
 
@@ -451,7 +492,7 @@ function InstallXO {
 	echo -e "${INFO} Symlinking fresh xo-web install/update to $INSTALLDIR/xo-web"
 	ln -sfn $INSTALLDIR/xo-builds/xen-orchestra-$TIME/packages/xo-web $INSTALLDIR/xo-web
 
-	if [ $XOUSER ]; then
+	if [[ "$XOUSER" != "root" ]]; then
 		chown -R $XOUSER:$XOUSER $INSTALLDIR/xo-builds/xen-orchestra-$TIME
 
 		if [ ! -d /var/lib/xo-server ]; then
@@ -459,6 +500,8 @@ function InstallXO {
 		fi
 
 		chown -R $XOUSER:$XOUSER /var/lib/xo-server
+		
+		chown -R $XOUSER:$XOUSER $CONFIGPATH/.config/xo-server
 	fi
 
 	# fix to prevent older installations to not update because systemd service is not symlinked anymore
@@ -529,15 +572,18 @@ function HandleArgs {
 
 	case "$1" in
 		--update)
+			CheckMemory
 			UpdateNodeYarn
 			UpdateXO
 			;;
 		--install)
 			if [ $OSNAME == "CentOS" ]; then
+				CheckMemory
 				InstallDependenciesCentOS
 				InstallXO
 				exit 0
 			else
+				CheckMemory
 				InstallDependenciesDebian
 				InstallXO
 				exit 0
@@ -548,6 +594,7 @@ function HandleArgs {
 			exit 0
 			;;
 		*)
+			CheckMemory
 			StartUpScreen
 			;;
 		esac
@@ -556,10 +603,10 @@ function HandleArgs {
 
 function RollBackInstallation {
 
-	INSTALLATIONS=($(find $INSTALLDIR/xo-builds/ -maxdepth 1 -type d -name "xen-orchestra-*"))
+	INSTALLATIONS=($(find $INSTALLDIR/xo-builds/ -maxdepth 1 -type d -name "xen-orchestra-*" 2>/dev/null))
 
 	if [[ $(echo ${#INSTALLATIONS[@]}) -le 1 ]]; then
-		echo -e "${INFO} Only one installation exists, nothing to change"
+		echo -e "${INFO} One or less installations exist, nothing to change"
 		exit 0
 	fi
 
@@ -597,18 +644,18 @@ function CheckOS {
 	if [ -f /etc/centos-release ] ; then
 		OSVERSION=$(grep -Eo "[0-9]" /etc/centos-release | head -1)
 		OSNAME="CentOS"
-		if [[ ! $OSVERSION == "7" ]]; then
-			echo -e "${FAIL} Only CentOS 7 supported"
+		if [[ ! $OSVERSION =~ ^(7|8) ]]; then
+			echo -e "${FAIL} Only CentOS 7/8 supported"
 			exit 0
 		fi
 	elif [[ -f /etc/os-release ]]; then
 		OSVERSION=$(grep ^VERSION_ID /etc/os-release | cut -d'=' -f2 | grep -Eo "[0-9]{1,2}" | head -1)
 		OSNAME=$(grep ^NAME /etc/os-release | cut -d'=' -f2 | sed 's/"//g' | awk '{print $1}')
-		if [[ $OSNAME == "Debian" ]] && [[ ! $OSVERSION =~ ^(8|9)$ ]]; then
-			echo -e "${FAIL} Only Debian 8/9 supported"
+		if [[ $OSNAME == "Debian" ]] && [[ ! $OSVERSION =~ ^(8|9|10)$ ]]; then
+			echo -e "${FAIL} Only Debian 8/9/10 supported"
 			exit 0
-		elif [[ $OSNAME == "Ubuntu" ]] && [[ ! $OSVERSION =~ ^(16|18)$ ]]; then
-			echo -e "${FAIL} Only Ubuntu 16/18 supported"
+		elif [[ $OSNAME == "Ubuntu" ]] && [[ ! $OSVERSION =~ ^(16|18|20)$ ]]; then
+			echo -e "${FAIL} Only Ubuntu 16/18/20 supported"
 			exit 0
 		fi
 	else
@@ -654,6 +701,17 @@ function CheckCertificate {
 
 } 2>$LOGFILE
 
+function CheckMemory {
+	SYSMEM=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+
+	if [[ $SYSMEM < 3000000 ]]; then
+		echo
+        	echo -e "${COLOR_RED}WARNING: you have less than 3GB of RAM in your system. Installation might run out of memory${COLOR_N}"
+        	echo
+	fi
+
+}	
+
 function PullDockerImage {
 
 	echo
@@ -672,48 +730,35 @@ function StartUpScreen {
 
 echo "-----------------------------------------"
 echo
-echo "This script will automatically install/update Xen-Orchestra"
-echo
-echo "- By default xo-server will be running as root to prevent issues with permissions and port binding."
-echo "  uncomment and edit XOUSER variable in this script to run service as unprivileged user"
-echo "  (Notice that you might have to make other changes depending on your system for this to work)"
-echo "  This method only changes the user which runs the service. Other install tasks like node packages are still ran as root"
-echo
-echo "- Option 2. actually creates a new build from sources but works as an update to installations originally done with this tool"
-echo "  NodeJS and Yarn packages are updated automatically. Check AUTOUPDATE variable to disable this"
-echo "  Data stored in redis and /var/lib/xo-server/data will not be touched during update procedure."
-echo "  X (defined in PRESERVE variable) number of latest installations will be preserved and older ones are deleted after successful update. Fresh installation is symlinked as active"
-echo "  Rollback to another installation with --rollback"
-echo
-echo "- To run option 2. without interactive mode (as cronjob for automated updates for example) use --update"
+echo "Welcome to automated Xen Orchestra install"
 echo
 echo "Following options will be used for installation:"
 echo
-echo "OS: $OSNAME $OSVERSION"
-echo "Basedir: $INSTALLDIR"
+echo -e "OS: ${COLOR_WHITE}$OSNAME $OSVERSION ${COLOR_N}"
+echo -e "Basedir: ${COLOR_WHITE}$INSTALLDIR ${COLOR_N}"
 
 if [ $XOUSER ]; then
-	echo "User: $XOUSER"
+	echo -e "User: ${COLOR_WHITE}$XOUSER ${COLOR_N}"
 else
-	echo "User: root"
+	echo -e "User: ${COLOR_WHITE}root ${COLOR_N}"
 fi
 
-echo "Port: $PORT"
-echo "Git Branch for source: $BRANCH"
-echo "Following plugins will be installed: "$PLUGINS""
-echo "Number of previous installations to preserve: $PRESERVE"
+echo -e "Port: ${COLOR_WHITE}$PORT${COLOR_N}"
+echo -e "Git Branch for source: ${COLOR_WHITE}$BRANCH${COLOR_N}"
+echo -e "Following plugins will be installed: ${COLOR_WHITE}"$PLUGINS"${COLOR_N}"
+echo -e "Number of previous installations to preserve: ${COLOR_WHITE}$PRESERVE${COLOR_N}"
 echo
-echo "Errorlog is stored to $LOGFILE for debug purposes"
+echo -e "Errorlog is stored to ${COLOR_WHITE}$LOGFILE${COLOR_N} for debug purposes"
 echo
-echo "Xen Orchestra configuration will be stored to $CONFIGPATH/.config/xo-server/config.toml, if you don't want it to be replaced with every update, set CONFIGUPDATE to false in xo-install.cfg"
+echo -e "Xen Orchestra configuration will be stored to ${COLOR_WHITE}$CONFIGPATH/.config/xo-server/config.toml${COLOR_N}, if you don't want it to be replaced with every update, set ${COLOR_WHITE}CONFIGUPDATE${COLOR_N} to false in ${COLOR_WHITE}xo-install.cfg${COLOR_N}"
 echo "-----------------------------------------"
 
 echo
-echo "1. Autoinstall"
-echo "2. Update / Install without packages"
-echo "3. Deploy docker container"
-echo "4. Rollback to another existing installation"
-echo "5. Exit"
+echo -e "${COLOR_WHITE}1. Autoinstall${COLOR_N}"
+echo -e "${COLOR_WHITE}2. Update / Install without packages${COLOR_N}"
+echo -e "${COLOR_WHITE}3. Deploy docker container${COLOR_N}"
+echo -e "${COLOR_WHITE}4. Rollback to another existing installation${COLOR_N}"
+echo -e "${COLOR_WHITE}5. Exit${COLOR_N}"
 echo
 read -p ": " option
 
@@ -781,5 +826,6 @@ if [[ $# == "1" ]]; then
 	HandleArgs "$1"
 	exit 0
 else
+	CheckMemory
 	StartUpScreen
 fi

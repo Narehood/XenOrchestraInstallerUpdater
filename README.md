@@ -3,11 +3,11 @@
 
 # In a nutshell
 
-This repo consist of script to install and update [Xen Orchestra](https://xen-orchestra.com/#!/) for CentOS 7/Ubuntu 18/Debian 9
+This repo consist of script to install and update [Xen Orchestra](https://xen-orchestra.com/#!/) for CentOS 8/Ubuntu 18/Debian 10
 
 Installation is done using latest xo-server and xo-web sources by default. With this method Xen-Orchestra has all features unlocked which are normally available only with monthly fee.
 
-Optional plugins can be installed. They are included in XO repository, but not installed by default. Check list from [Xen Orchestra plugins](https://github.com/vatesfr/xen-orchestra/tree/master/packages) and edit xo-install.cfg accordingly.
+Optional plugins are available and all of them will be installed by default by this script. If you need only specific ones, check list from [Xen Orchestra plugins](https://github.com/vatesfr/xen-orchestra/tree/master/packages) and edit xo-install.cfg accordingly.
 
 Xen-Orchestra is a great project and i strongly encourage you to consider the supported version of their product.
 
@@ -15,6 +15,10 @@ Paid version comes with pro support and appliance and is the suggested option fo
 
 
 # Instructions
+
+### platform
+
+Suggested platform is a VM with fresh install of any of the supported OS. You should put at least 3GB of RAM to the machine, but preferably 2vCPU/4GB RAM. Otherwise you may encounter OOM error during installation because of running out of memory.
 
 ### script
 Clone this repository, copy sample.xo-install.cfg as xo-install.cfg and edit variables to suit your preferences and run xo-install.sh as root. Sample configuration will be copied as xo-install.cfg
@@ -58,18 +62,19 @@ notes:
 
 Tool has been tested to work with following distros:
 
-- CentOS 7 (note LVM file level restore issue from below)
-- Debian 9
+- CentOS 8 (note LVM file level restore issue from below)
+- Debian 10
 - Ubuntu 18.04
 
 Installation works but not tested frequently:
+- CentOS 7
 - Debian 8
+- Debian 9
 - Ubuntu 16.04
-- Debian 10 (experimental branch)
-- Ubuntu 19 (experimental branch)
+- Ubuntu 20.04
 
 In order to use file level restore from delta backups, the service needs to be ran as root.
-CentOS installation is currently not able to do file level restore if the backed up disk contains LVM.
+CentOS installation is currently not able to do file level restore if the backed up disk contains LVM or only sees some of the partitions.
 
 CentOS setup is confirmed to work with fresh minimal installation and SELinux enabled.
 Although script doesn't do any SELinux checks or modifications, so you need to take care of possible changes by yourself according to your system.
@@ -83,7 +88,7 @@ Below is a list of packages that will be installed if missing.
 CentOS:
 - curl
 - epel-release
-- nodejs (v8)
+- nodejs (v12)
 - npm (v3)
 - yarn
 - gcc
@@ -97,6 +102,7 @@ CentOS:
 - nfs-utils
 - libvhdi-tools
 - cifs-utils
+- lvm2
 
 Debian/Ubuntu:
 - apt-transport-https
@@ -104,15 +110,17 @@ Debian/Ubuntu:
 - libcap2-bin
 - curl
 - yarn
-- nodejs (v8)
+- nodejs (v12) (possible debian 10 default nodejs v10 will be replaced)
 - npm (v3)
 - build-essential
 - redis-server
 - libpng-dev
 - git
 - python-minimal
+- python2-minimal (Ubuntu 20 only, replaces python-minimal)
 - libvhdi-utils
 - lvm2
 - nfs-common
 - cifs-utils
+- gnupg (debian 10)
 ```
